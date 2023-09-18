@@ -42,6 +42,24 @@ module "ops-vpc" {
   }
 }
 
+# resource "aws_security_group" "allow_all" {
+#   name        = "allow_all"
+#   description = "Allow ALL TCP inbound traffic"
+#   vpc_id      = module.ops-vpc.vpc_id
+
+#   ingress {
+#     description      = "All Traffic from VPC"
+#     from_port        = 0
+#     to_port          = 0
+#     protocol         = -1
+#     cidr_blocks      = var.mrc_vpc_cidrs
+#   }
+
+#   tags = {
+#     Name = "allow_all"
+#   }
+# }
+
 ##################################### AWS CLUSTER AUTH #########################################
 
 data "aws_eks_cluster_auth" "cluster" {
@@ -167,7 +185,7 @@ resource "aws_eks_node_group" "default-node-pool" {
   node_group_name = "${var.cluster_name}-default-node-pool"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = module.ops-vpc.private_subnets
-  disk_size       = 200
+  disk_size       = 500
   instance_types  = ["${var.cluster_node_type}"]
   scaling_config {
     desired_size = var.cluster_nodes
@@ -187,6 +205,11 @@ resource "aws_eks_node_group" "default-node-pool" {
     aws_eks_addon.kube-proxy,
     # aws_eks_addon.coredns
   ]
+  tags = {
+    "cluster" = var.cluster_name,
+    "pool" = "default",
+    "role" = "cluster_node"
+  }
 }
 
 ##################################### AWS BASIC APPLICATIONS #########################################
@@ -254,7 +277,10 @@ resource "kubectl_manifest" "aws-auth" {
 ##################################### AWS GP3 STORAGE CLASS #########################################
 
 data "kubectl_file_documents" "aws-ebs-gp3" {
-    content = file("${path.module}/configs/ebs-gp3.yaml")
+    content = templatefile("${path.module}/configs/ebs-gp3.yaml", {
+      k8s_aws_region = var.cluster_region
+    })
+    # content = file("${path.module}/configs/ebs-gp3.yaml")
 }
 
 resource "kubectl_manifest" "aws-ebs" {
@@ -284,7 +310,7 @@ resource "kubectl_manifest" "cfk-crds" {
 resource "helm_release" "confluent-operator" {
   name       = "confluent-operator"
   chart      = "${path.module}/dependencies/confluent-for-kubernetes"
-  namespace = "confluent"
+  namespace = var.confluent_k8s_namespace
   cleanup_on_fail = true
   create_namespace = true
   values = [file("${path.module}/dependencies/confluent-for-kubernetes/values.yaml")]
@@ -298,7 +324,9 @@ resource "helm_release" "confluent-operator" {
 }
 
 data "kubectl_file_documents" "cfk-permissions" {
-    content = file("${path.module}/dependencies/confluent-for-kubernetes/cfk-permission.yaml")
+    content = templatefile("${path.module}/dependencies/confluent-for-kubernetes/cfk-permission.yaml", {
+        confluent_k8s_ns = var.confluent_k8s_namespace
+    })
 }
 
 resource "kubectl_manifest" "cfk-permissions" {
@@ -306,5 +334,17 @@ resource "kubectl_manifest" "cfk-permissions" {
   yaml_body = each.value
   depends_on = [
     helm_release.confluent-operator
+  ]
+}
+
+resource "helm_release" "open-ldap" {
+  name       = "open-ldap"
+  chart      = "${path.module}/dependencies/openldap"
+  namespace = var.confluent_k8s_namespace
+  cleanup_on_fail = true
+  create_namespace = false
+  values = [file("${path.module}/dependencies/openldap/ldaps-rbac.yaml")]
+  depends_on = [
+    kubectl_manifest.cfk-crds
   ]
 }

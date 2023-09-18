@@ -3,7 +3,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: confluent-operator
-  namespace: confluent
+  namespace: ${confluent_k8s_ns}
 rules:
 # The cluster.confluent.com and operator.confluent.cloud rules only needed when migrating from operator 1.x
 - apiGroups:
@@ -119,11 +119,11 @@ kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: confluent-operator
-  namespace: confluent
+  namespace: ${confluent_k8s_ns}
 subjects:
 - kind: ServiceAccount
   name: confluent-for-kubernetes # customize as required
-  namespace: confluent # customize as required
+  namespace: ${confluent_k8s_ns} # customize as required
 roleRef:
   kind: Role
   name: confluent-operator
@@ -167,7 +167,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: confluent-for-kubernetes # customize as required
-    namespace: confluent # customize as required
+    namespace: ${confluent_k8s_ns} # customize as required
 roleRef:
   kind: ClusterRole
   name: confluent-operator-webhook-operator

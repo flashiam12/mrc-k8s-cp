@@ -1,6 +1,12 @@
 output "vpc_id" {
   value = module.ops-vpc.vpc_id
 }
+output "default_security_group_id" {
+  value = module.ops-vpc.default_security_group_id
+}
+output "public_subnet_cidr" {
+  value = module.ops-vpc.public_subnets
+}
 output "cluster_endpoint" {
   value = data.aws_eks_cluster.cluster.endpoint
 }

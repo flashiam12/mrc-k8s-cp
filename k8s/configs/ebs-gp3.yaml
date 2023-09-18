@@ -13,5 +13,5 @@ allowedTopologies:
 - matchLabelExpressions:
   - key: failure-domain.beta.kubernetes.io/zone
     values:
-    - us-west-2a
-    - us-west-2b
+    - ${k8s_aws_region}a
+    - ${k8s_aws_region}b

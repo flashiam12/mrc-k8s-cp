@@ -24,3 +24,9 @@ variable "aws_api_secret" {
 variable "aws_ssh_key" {
   type = string
 }
+variable "confluent_k8s_namespace" {
+  type = string
+}
+variable "mrc_vpc_cidrs" {
+  type = list(string)
+}

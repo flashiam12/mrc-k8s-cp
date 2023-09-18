@@ -6,14 +6,14 @@ metadata:
 spec:
   authorization:
     superUsers:
-      - User:kafka
+      - User:kafka-client
     type: rbac
   configOverrides:
     server:
       - client.rack=us-central1
       - confluent.license.topic.replication.factor=3
       - replica.selector.class=org.apache.kafka.common.replica.RackAwareReplicaSelector
-  dataVolumeCapacity: 10Gi
+  dataVolumeCapacity: 100Gi
   dependencies:
     kafkaRest:
       authentication:
@@ -39,6 +39,10 @@ spec:
         type: plain
       externalAccess:
         loadBalancer:
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-type: external
+            service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+            service.beta.kubernetes.io/aws-load-balancer-scheme: internal
           bootstrapPrefix: kafka.central
           brokerPrefix: kafka.central.broker
           domain: mydomain.com

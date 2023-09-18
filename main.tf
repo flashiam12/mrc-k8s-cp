@@ -73,6 +73,8 @@ module "k8s-east" {
   aws_api_key = var.aws_api_key
   aws_api_secret = var.aws_api_secret
   aws_ssh_key = aws_key_pair.kp-east.key_name
+  confluent_k8s_namespace = "east"
+  mrc_vpc_cidrs = [local.central.vpc_cidr, local.west.vpc_cidr]
 }
 
 module "k8s-west" {
@@ -86,6 +88,8 @@ module "k8s-west" {
   aws_api_key = var.aws_api_key
   aws_api_secret = var.aws_api_secret
   aws_ssh_key = aws_key_pair.kp-west.key_name
+  confluent_k8s_namespace = "west"
+  mrc_vpc_cidrs = [local.central.vpc_cidr, local.east.vpc_cidr]
 }
 
 module "k8s-central" {
@@ -99,6 +103,8 @@ module "k8s-central" {
   aws_api_key = var.aws_api_key
   aws_api_secret = var.aws_api_secret
   aws_ssh_key = aws_key_pair.kp-central.key_name
+  confluent_k8s_namespace = "central"
+  mrc_vpc_cidrs = [local.east.vpc_cidr, local.west.vpc_cidr]
 }
 
 ########################################## East West Peering ################################
@@ -123,6 +129,7 @@ module "east-west-peer" {
     Kind        = "POC"
     Terraform   = "True"
   }
+
 }
 
 # ########################################## West Central Peering ################################
@@ -149,7 +156,7 @@ module "west-central-peer" {
   }
 }
 
-# ########################################## Central East Peering ################################
+# # ########################################## Central East Peering ################################
 
 module "central-east-peer" {
   source  = "grem11n/vpc-peering/aws"
@@ -170,5 +177,170 @@ module "central-east-peer" {
     Environment = "dev"
     Kind        = "POC"
     Terraform   = "True"
+  }  
+}
+
+# # ########################################## Private Hosted Zone ################################
+
+resource "aws_route53_zone" "default" {
+  name = "mydomain.com"
+
+  vpc {
+    vpc_id = module.k8s-central.vpc_id
+    vpc_region = local.central.region
+  }
+  vpc {
+    vpc_id = module.k8s-east.vpc_id
+    vpc_region = local.east.region
+  }
+  vpc {
+    vpc_id = module.k8s-west.vpc_id
+    vpc_region = local.west.region
+  }
+}
+
+data "aws_lb" "east-kakfa-0" {
+  provider = aws.aws-east
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-east"
+    "service.k8s.aws/stack" = "east/kafka-0-lb"
+  }
+}
+
+data "aws_lb" "east-kakfa-1" {
+  provider = aws.aws-east
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-east"
+    "service.k8s.aws/stack" = "east/kafka-1-lb"
+  }
+}
+
+data "aws_lb" "east-kakfa-lb" {
+  provider = aws.aws-east
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-east"
+    "service.k8s.aws/stack" = "east/kafka-bootstrap-lb"
+  }
+}
+
+data "aws_lb" "west-kakfa-0" {
+  provider = aws.aws-west
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-west"
+    "service.k8s.aws/stack" = "west/kafka-0-lb"
+  }
+}
+
+data "aws_lb" "west-kakfa-1" {
+  provider = aws.aws-west
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-west"
+    "service.k8s.aws/stack" = "west/kafka-1-lb"
+  }
+}
+
+data "aws_lb" "west-kakfa-lb" {
+  provider = aws.aws-west
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-west"
+    "service.k8s.aws/stack" = "west/kafka-bootstrap-lb"
+  }
+}
+
+data "aws_lb" "central-kakfa-0" {
+  provider = aws.aws-central
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-central"
+    "service.k8s.aws/stack" = "central/kafka-0-lb"
+  }
+}
+
+data "aws_lb" "central-kakfa-1" {
+  provider = aws.aws-central
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-central"
+    "service.k8s.aws/stack" = "central/kafka-1-lb"
+  }
+}
+
+data "aws_lb" "central-kakfa-lb" {
+  provider = aws.aws-central
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-central"
+    "service.k8s.aws/stack" = "central/kafka-bootstrap-lb"
+  }
+}
+
+data "aws_lb" "central-controlcenter-lb" {
+  provider = aws.aws-central
+  tags = {
+    "elbv2.k8s.aws/cluster" = "citi-central"
+    "service.k8s.aws/stack" = "central/controlcenter-bootstrap-lb"
+  }
+}
+
+data "aws_lb" "cp-ingress" {
+  name = "cp-ingress"
+}
+
+## Bastion Host 
+
+resource "aws_key_pair" "bastion-host" {
+  provider = aws.aws-east
+  key_name   = "citi-mrc-bastion" 
+  public_key = tls_private_key.pk.public_key_openssh
+
+  provisioner "local-exec" { 
+    command = "echo '${tls_private_key.pk.private_key_pem}' > ./secrets/citi-mrc-bastion.pem"
+  }
+}
+
+module "bastion_host" {
+  providers = {
+    aws = aws.aws-central
+  }
+  source  = "terraform-aws-modules/ec2-instance/aws"
+  version = "~> 3.0"
+
+  name = "citi-mrc-poc-bastion"
+
+  ami                    = "ami-060b1c20c93e475fd"
+  instance_type          = "t3.large"
+  key_name               = aws_key_pair.bastion-host.key_name
+  monitoring             = true
+  vpc_security_group_ids = [module.k8s-central.default_security_group_id]
+  subnet_id              = module.k8s-central.public_subnet_cidr[0]
+  associate_public_ip_address = true
+
+  tags = {
+    Terraform   = "true"
+    Environment = "ops"
+    Owner = "Shiv"
+    Purpose = "citi-mrc-setup"
+  }
+}
+
+module "bastion_host_linux" {
+  providers = {
+    aws = aws.aws-central
+  }
+  source  = "terraform-aws-modules/ec2-instance/aws"
+  version = "~> 3.0"
+
+  name = "citi-mrc-poc-bastion-linux"
+
+  ami                    = "ami-024e6efaf93d85776"
+  instance_type          = "t3.large"
+  key_name               = aws_key_pair.bastion-host.key_name
+  monitoring             = true
+  vpc_security_group_ids = [module.k8s-central.default_security_group_id]
+  subnet_id              = module.k8s-central.public_subnet_cidr[0]
+  associate_public_ip_address = true
+
+  tags = {
+    Terraform   = "true"
+    Environment = "ops"
+    Owner = "Shiv"
+    Purpose = "citi-mrc-setup"
   }
 }
